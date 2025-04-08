@@ -1,3 +1,4 @@
+// components/LexicalViewer.tsx
 'use client';
 
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
@@ -7,22 +8,55 @@ import { useEffect } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { $getRoot, $createParagraphNode, $createTextNode } from 'lexical';
-import { HeadingNode } from '@lexical/rich-text'; // Import HeadingNode
+import { HeadingNode } from '@lexical/rich-text';
+import { CodeNode } from '@lexical/code';
+import { ListNode, ListItemNode } from '@lexical/list';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 const theme = {
   paragraph: 'mb-4',
   heading: { h1: 'text-3xl font-bold mb-4', h2: 'text-2xl font-semibold mb-3' },
   text: { bold: 'font-bold', italic: 'italic' },
+  code: 'bg-gray-800 text-white p-2 rounded block font-mono text-sm',
+  list: {
+    ul: 'list-disc pl-6',
+    ol: 'list-decimal pl-6',
+  },
 };
 
 function EditorStateLoader({ json }: { json: string }) {
   const [editor] = useLexicalComposerContext();
+
   useEffect(() => {
     if (json) {
       try {
-        const state = editor.parseEditorState(json);
-        console.log('Parsed Editor State:', state); // Log for debugging
+        // Log the raw JSON for debugging
+        console.log('Raw Lexical JSON:', json);
+
+        // Parse the JSON string to an object for sanitization
+        let parsedJson = JSON.parse(json);
+
+        // Recursively sanitize indent values in the node tree
+        const sanitizeIndent = (node: any) => {
+          if (node.indent !== undefined) {
+            node.indent = Number.isInteger(node.indent) && node.indent >= 0 ? node.indent : 0;
+          }
+          if (node.children && Array.isArray(node.children)) {
+            node.children.forEach(sanitizeIndent);
+          }
+        };
+
+        // Apply sanitization to the root node
+        if (parsedJson.root) {
+          sanitizeIndent(parsedJson.root);
+        }
+
+        // Convert back to string for Lexical
+        const sanitizedJson = JSON.stringify(parsedJson);
+
+        // Parse and set the editor state
+        const state = editor.parseEditorState(sanitizedJson);
+        console.log('Parsed Editor State:', state);
         if (state && !state.isEmpty()) {
           editor.setEditorState(state);
         } else {
@@ -57,6 +91,7 @@ function EditorStateLoader({ json }: { json: string }) {
       });
     }
   }, [editor, json]);
+
   return null;
 }
 
@@ -73,7 +108,7 @@ export default function LexicalViewer({ json }: { json: string }) {
             theme,
             editable: false,
             onError: console.error,
-            nodes: [HeadingNode], // Ensure HeadingNode is registered
+            nodes: [HeadingNode, CodeNode, ListNode, ListItemNode],
           }}
         >
           <EditorStateLoader json={json} />
