@@ -1,4 +1,3 @@
-// components/LexicalViewer.tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -17,10 +16,7 @@ const theme = {
   heading: { h1: 'text-3xl font-bold mb-4', h2: 'text-2xl font-semibold mb-3' },
   text: { bold: 'font-bold', italic: 'italic' },
   code: 'bg-gray-800 text-white p-2 rounded block font-mono text-sm',
-  list: {
-    ul: 'list-disc pl-6',
-    ol: 'list-decimal pl-6',
-  },
+  list: { ul: 'list-disc pl-6', ol: 'list-decimal pl-6' },
 };
 
 function Page({ pageJson }: { pageJson: string }) {
@@ -61,16 +57,18 @@ export default function LexicalViewer({ json }: { json: string }) {
     );
   }
 
-  const nodesPerPage = 5; // Adjustable based on performance needs
+  const nodesPerPage = 5;
   const totalNodes = parsedState.root.children.length;
   const pageCount = Math.ceil(totalNodes / nodesPerPage);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
+        console.log('Observer triggered with entries:', entries);
         const currentPage = entries.find((e) => e.isIntersecting)?.target.getAttribute('data-page');
         if (currentPage) {
           const pageNum = parseInt(currentPage, 10);
+          console.log('Page in view:', pageNum);
           setVisiblePages([
             Math.max(0, pageNum - 1),
             pageNum,
@@ -78,13 +76,12 @@ export default function LexicalViewer({ json }: { json: string }) {
           ]);
         }
       },
-      
-      { root: containerRef.current, threshold: 0.5 }
+      { root: containerRef.current, threshold: 0.1 }
     );
 
     pageRefs.current.forEach((ref) => ref && observer.observe(ref));
     return () => observer.disconnect();
-  }, [pageCount]);
+  }, [visiblePages, pageCount]);
 
   return (
     <Card>
