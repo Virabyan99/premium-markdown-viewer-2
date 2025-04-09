@@ -78,6 +78,7 @@ export default function LexicalViewer({ json }: { json: string }) {
           ]);
         }
       },
+      
       { root: containerRef.current, threshold: 0.5 }
     );
 
