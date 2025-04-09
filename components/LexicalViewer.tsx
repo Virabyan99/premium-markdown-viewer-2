@@ -1,13 +1,12 @@
 // components/LexicalViewer.tsx
 'use client';
 
+import { useState, useEffect, useRef } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
-import { useEffect } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
-import { $getRoot, $createParagraphNode, $createTextNode } from 'lexical';
 import { HeadingNode } from '@lexical/rich-text';
 import { CodeNode } from '@lexical/code';
 import { ListNode, ListItemNode } from '@lexical/list';
@@ -24,100 +23,105 @@ const theme = {
   },
 };
 
-function EditorStateLoader({ json }: { json: string }) {
+function Page({ pageJson }: { pageJson: string }) {
   const [editor] = useLexicalComposerContext();
-
   useEffect(() => {
-    if (json) {
-      try {
-        // Log the raw JSON for debugging
-        console.log('Raw Lexical JSON:', json);
-
-        // Parse the JSON string to an object for sanitization
-        let parsedJson = JSON.parse(json);
-
-        // Recursively sanitize indent values in the node tree
-        const sanitizeIndent = (node: any) => {
-          if (node.indent !== undefined) {
-            node.indent = Number.isInteger(node.indent) && node.indent >= 0 ? node.indent : 0;
-          }
-          if (node.children && Array.isArray(node.children)) {
-            node.children.forEach(sanitizeIndent);
-          }
-        };
-
-        // Apply sanitization to the root node
-        if (parsedJson.root) {
-          sanitizeIndent(parsedJson.root);
-        }
-
-        // Convert back to string for Lexical
-        const sanitizedJson = JSON.stringify(parsedJson);
-
-        // Parse and set the editor state
-        const state = editor.parseEditorState(sanitizedJson);
-        console.log('Parsed Editor State:', state);
-        if (state && !state.isEmpty()) {
-          editor.setEditorState(state);
-        } else {
-          editor.update(() => {
-            const root = $getRoot();
-            if (root.getFirstChild() === null) {
-              const paragraph = $createParagraphNode();
-              paragraph.append($createTextNode('No content available'));
-              root.append(paragraph);
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Failed to parse editor state:', error);
-        editor.update(() => {
-          const root = $getRoot();
-          if (root.getFirstChild() === null) {
-            const paragraph = $createParagraphNode();
-            paragraph.append($createTextNode('Error loading content'));
-            root.append(paragraph);
-          }
-        });
-      }
-    } else {
-      editor.update(() => {
-        const root = $getRoot();
-        if (root.getFirstChild() === null) {
-          const paragraph = $createParagraphNode();
-          paragraph.append($createTextNode('Upload a file to see content'));
-          root.append(paragraph);
-        }
-      });
+    try {
+      const state = editor.parseEditorState(pageJson);
+      editor.setEditorState(state);
+    } catch (error) {
+      console.error('Error setting page state:', error);
     }
-  }, [editor, json]);
-
-  return null;
+  }, [editor, pageJson]);
+  return (
+    <RichTextPlugin
+      contentEditable={<ContentEditable className="prose max-w-none p-2" />}
+      placeholder={null}
+      ErrorBoundary={LexicalErrorBoundary}
+    />
+  );
 }
 
 export default function LexicalViewer({ json }: { json: string }) {
+  const [visiblePages, setVisiblePages] = useState([0, 1, 2]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
+  let parsedState;
+  try {
+    parsedState = JSON.parse(json);
+  } catch (error) {
+    console.error('Failed to parse JSON:', error);
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Preview</CardTitle>
+        </CardHeader>
+        <CardContent>Error loading content</CardContent>
+      </Card>
+    );
+  }
+
+  const nodesPerPage = 5; // Adjustable based on performance needs
+  const totalNodes = parsedState.root.children.length;
+  const pageCount = Math.ceil(totalNodes / nodesPerPage);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const currentPage = entries.find((e) => e.isIntersecting)?.target.getAttribute('data-page');
+        if (currentPage) {
+          const pageNum = parseInt(currentPage, 10);
+          setVisiblePages([
+            Math.max(0, pageNum - 1),
+            pageNum,
+            Math.min(pageNum + 1, pageCount - 1),
+          ]);
+        }
+      },
+      { root: containerRef.current, threshold: 0.5 }
+    );
+
+    pageRefs.current.forEach((ref) => ref && observer.observe(ref));
+    return () => observer.disconnect();
+  }, [pageCount]);
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Preview</CardTitle>
       </CardHeader>
       <CardContent>
-        <LexicalComposer
-          initialConfig={{
-            namespace: 'MDViewer',
-            theme,
-            editable: false,
-            onError: console.error,
-            nodes: [HeadingNode, CodeNode, ListNode, ListItemNode],
-          }}
-        >
-          <EditorStateLoader json={json} />
-          <RichTextPlugin
-            contentEditable={<ContentEditable className="prose max-w-none" />}
-            placeholder={null}
-            ErrorBoundary={LexicalErrorBoundary}
-          />
-        </LexicalComposer>
+        <div ref={containerRef} className="max-h-[80vh] overflow-y-auto space-y-4">
+          {Array.from({ length: pageCount }).map((_, idx) => {
+            if (!visiblePages.includes(idx)) return null;
+            const start = idx * nodesPerPage;
+            const end = start + nodesPerPage;
+            const pageNodes = parsedState.root.children.slice(start, end);
+            const pageJson = JSON.stringify({
+              root: { ...parsedState.root, children: pageNodes },
+            });
+            return (
+              <div
+                key={idx}
+                ref={(el) => (pageRefs.current[idx] = el)}
+                data-page={idx}
+                className="transition-opacity duration-300"
+              >
+                <LexicalComposer
+                  initialConfig={{
+                    namespace: `Page${idx}`,
+                    theme,
+                    nodes: [HeadingNode, CodeNode, ListNode, ListItemNode],
+                    editable: false,
+                    onError: console.error,
+                  }}
+                >
+                  <Page pageJson={pageJson} />
+                </LexicalComposer>
+              </div>
+            );
+          })}
+        </div>
       </CardContent>
     </Card>
   );
