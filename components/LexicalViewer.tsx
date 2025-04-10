@@ -42,6 +42,8 @@ export default function LexicalViewer({ json }: { json: string }) {
   const [visiblePages, setVisiblePages] = useState([0, 1, 2]);
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
   let parsedState;
   try {
     parsedState = JSON.parse(json);
@@ -61,27 +63,37 @@ export default function LexicalViewer({ json }: { json: string }) {
   const totalNodes = parsedState.root.children.length;
   const pageCount = Math.ceil(totalNodes / nodesPerPage);
 
+  // Create the observer once on mount
   useEffect(() => {
-    const observer = new IntersectionObserver(
+    observerRef.current = new IntersectionObserver(
       (entries) => {
         console.log('Observer triggered with entries:', entries);
         const currentPage = entries.find((e) => e.isIntersecting)?.target.getAttribute('data-page');
         if (currentPage) {
           const pageNum = parseInt(currentPage, 10);
           console.log('Page in view:', pageNum);
-          setVisiblePages([
-            Math.max(0, pageNum - 1),
-            pageNum,
-            Math.min(pageNum + 1, pageCount - 1),
-          ]);
+          setVisiblePages((prev) => {
+            const newVisiblePages = [
+              Math.max(0, pageNum - 1),
+              pageNum,
+              Math.min(pageNum + 1, pageCount - 1),
+            ];
+            // Prevent unnecessary updates if pages are already visible
+            if (newVisiblePages.every((p) => prev.includes(p)) && prev.length === newVisiblePages.length) {
+              return prev;
+            }
+            return newVisiblePages;
+          });
         }
       },
       { root: containerRef.current, threshold: 0.1 }
     );
 
-    pageRefs.current.forEach((ref) => ref && observer.observe(ref));
-    return () => observer.disconnect();
-  }, [visiblePages, pageCount]);
+    // Cleanup on unmount
+    return () => {
+      observerRef.current?.disconnect();
+    };
+  }, []); // Empty dependency array: runs once
 
   return (
     <Card>
@@ -101,7 +113,17 @@ export default function LexicalViewer({ json }: { json: string }) {
             return (
               <div
                 key={idx}
-                ref={(el) => (pageRefs.current[idx] = el)}
+                ref={(el) => {
+                  // Unobserve previous element if it exists
+                  if (pageRefs.current[idx] && observerRef.current) {
+                    observerRef.current.unobserve(pageRefs.current[idx]);
+                  }
+                  pageRefs.current[idx] = el;
+                  // Observe new element when mounted
+                  if (el && observerRef.current) {
+                    observerRef.current.observe(el);
+                  }
+                }}
                 data-page={idx}
                 className="transition-opacity duration-300"
               >
