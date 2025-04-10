@@ -7,7 +7,8 @@ import LexicalViewer from '@/components/LexicalViewer';
 import AstExplorer from '@/components/AstExplorer';
 import { parseMarkdownToAst } from '@/lib/parseMarkdownAst';
 import { mdastToLexicalJson } from '@/lib/mdastToLexical';
-import { lintMarkdown, LintMessage } from '@/lib/lintMarkdown'; // Import linting utility
+import { lintMarkdown, LintMessage } from '@/lib/lintMarkdown';
+import { repairMarkdown } from '@/lib/repairMarkdown'; // Import repair utility
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,23 +16,25 @@ import type { Root } from 'mdast';
 
 export default function HomePage() {
   const [rawMarkdown, setRawMarkdown] = useState<string | null>(null);
+  const [fixedMarkdown, setFixedMarkdown] = useState<string | null>(null); // State for repaired Markdown
   const [lexicalJson, setLexicalJson] = useState<string | null>(null);
   const [markdownAst, setMarkdownAst] = useState<Root | null>(null);
-  const [lintIssues, setLintIssues] = useState<LintMessage[]>([]); // State for linting issues
+  const [lintIssues, setLintIssues] = useState<LintMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Process the original Markdown
   useEffect(() => {
     if (!rawMarkdown) return;
     setLoading(true);
     setError(null);
     Promise.all([
       parseMarkdownToAst(rawMarkdown),
-      lintMarkdown(rawMarkdown), // Run linting
+      lintMarkdown(rawMarkdown),
     ])
       .then(([ast, issues]) => {
         setMarkdownAst(ast);
-        setLintIssues(issues); // Set linting issues
+        setLintIssues(issues);
         const json = mdastToLexicalJson(ast);
         setLexicalJson(json);
         setLoading(false);
@@ -42,6 +45,28 @@ export default function HomePage() {
         setLoading(false);
       });
   }, [rawMarkdown]);
+
+  // Process the repaired Markdown when fixedMarkdown changes
+  useEffect(() => {
+    if (!fixedMarkdown) return;
+    setLoading(true);
+    Promise.all([
+      parseMarkdownToAst(fixedMarkdown),
+      lintMarkdown(fixedMarkdown),
+    ])
+      .then(([ast, issues]) => {
+        setMarkdownAst(ast);
+        setLintIssues(issues);
+        const json = mdastToLexicalJson(ast);
+        setLexicalJson(json);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error('Error processing repaired Markdown:', err);
+        setError('Failed to process repaired Markdown');
+        setLoading(false);
+      });
+  }, [fixedMarkdown]);
 
   const exportToHtml = () => {
     if (!lexicalJson) return;
@@ -86,6 +111,13 @@ export default function HomePage() {
     }
   };
 
+  const handleRepair = async () => {
+    if (!rawMarkdown || !lintIssues.length) return;
+    setLoading(true);
+    const repaired = await repairMarkdown(rawMarkdown, lintIssues);
+    setFixedMarkdown(repaired);
+  };
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-4xl space-y-6">
@@ -104,6 +136,9 @@ export default function HomePage() {
                       </li>
                     ))}
                   </ul>
+                  <Button onClick={handleRepair} className="mt-4">
+                    Fix with AI (Mock)
+                  </Button>
                 </CardContent>
               </Card>
             )}
@@ -125,7 +160,7 @@ export default function HomePage() {
                 <Card>
                   <CardContent className="pt-6">
                     <pre className="text-sm text-gray-700 max-h-[400px] overflow-auto">
-                      {rawMarkdown}
+                      {fixedMarkdown || rawMarkdown}
                     </pre>
                   </CardContent>
                 </Card>
