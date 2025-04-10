@@ -1,4 +1,4 @@
-// page.tsx
+// src/app/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -7,6 +7,7 @@ import LexicalViewer from '@/components/LexicalViewer';
 import AstExplorer from '@/components/AstExplorer';
 import { parseMarkdownToAst } from '@/lib/parseMarkdownAst';
 import { mdastToLexicalJson } from '@/lib/mdastToLexical';
+import { lintMarkdown, LintMessage } from '@/lib/lintMarkdown'; // Import linting utility
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -16,6 +17,7 @@ export default function HomePage() {
   const [rawMarkdown, setRawMarkdown] = useState<string | null>(null);
   const [lexicalJson, setLexicalJson] = useState<string | null>(null);
   const [markdownAst, setMarkdownAst] = useState<Root | null>(null);
+  const [lintIssues, setLintIssues] = useState<LintMessage[]>([]); // State for linting issues
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,19 +25,22 @@ export default function HomePage() {
     if (!rawMarkdown) return;
     setLoading(true);
     setError(null);
-    try {
-      const ast = parseMarkdownToAst(rawMarkdown);
-      console.log('Parsed AST:', ast);
-      setMarkdownAst(ast);
-      const json = mdastToLexicalJson(ast);
-      console.log('Lexical JSON:', json);
-      setLexicalJson(json);
-      setLoading(false);
-    } catch (err) {
-      console.error('Error processing Markdown:', err);
-      setError('Failed to process Markdown');
-      setLoading(false);
-    }
+    Promise.all([
+      parseMarkdownToAst(rawMarkdown),
+      lintMarkdown(rawMarkdown), // Run linting
+    ])
+      .then(([ast, issues]) => {
+        setMarkdownAst(ast);
+        setLintIssues(issues); // Set linting issues
+        const json = mdastToLexicalJson(ast);
+        setLexicalJson(json);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error('Error processing Markdown:', err);
+        setError('Failed to process Markdown');
+        setLoading(false);
+      });
   }, [rawMarkdown]);
 
   const exportToHtml = () => {
@@ -77,7 +82,7 @@ export default function HomePage() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Error exporting to CommentairesHTML:', error);
+      console.error('Error exporting to HTML:', error);
     }
   };
 
@@ -88,6 +93,20 @@ export default function HomePage() {
         <FileDrop onFileRead={setRawMarkdown} />
         {rawMarkdown && (
           <div className="flex flex-col space-y-4">
+            {lintIssues.length > 0 && (
+              <Card className="bg-yellow-50 border-yellow-300">
+                <CardContent className="pt-6 text-yellow-800">
+                  <p className="font-medium">⚠️ Markdown Issues Detected:</p>
+                  <ul className="list-disc list-inside text-sm mt-2">
+                    {lintIssues.map((msg, i) => (
+                      <li key={i}>
+                        Line {msg.line}, Col {msg.column}: {msg.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
             <Tabs defaultValue="preview" className="w-full">
               <div className="flex justify-between items-center">
                 <TabsList className="grid w-full max-w-md grid-cols-3">
