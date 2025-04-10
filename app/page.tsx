@@ -8,15 +8,17 @@ import AstExplorer from '@/components/AstExplorer';
 import { parseMarkdownToAst } from '@/lib/parseMarkdownAst';
 import { mdastToLexicalJson } from '@/lib/mdastToLexical';
 import { lintMarkdown, LintMessage } from '@/lib/lintMarkdown';
-import { repairMarkdown } from '@/lib/repairMarkdown'; // Import repair utility
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { Root } from 'mdast';
 
+// Your deployed Worker URL
+const WORKER_URL = 'https://md-repair-worker.gmparstone99.workers.dev/repair';
+
 export default function HomePage() {
   const [rawMarkdown, setRawMarkdown] = useState<string | null>(null);
-  const [fixedMarkdown, setFixedMarkdown] = useState<string | null>(null); // State for repaired Markdown
+  const [fixedMarkdown, setFixedMarkdown] = useState<string | null>(null);
   const [lexicalJson, setLexicalJson] = useState<string | null>(null);
   const [markdownAst, setMarkdownAst] = useState<Root | null>(null);
   const [lintIssues, setLintIssues] = useState<LintMessage[]>([]);
@@ -114,8 +116,22 @@ export default function HomePage() {
   const handleRepair = async () => {
     if (!rawMarkdown || !lintIssues.length) return;
     setLoading(true);
-    const repaired = await repairMarkdown(rawMarkdown, lintIssues);
-    setFixedMarkdown(repaired);
+    try {
+      const response = await fetch(WORKER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: rawMarkdown, issues: lintIssues }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to repair Markdown');
+      }
+      const repaired = await response.text();
+      setFixedMarkdown(repaired);
+    } catch (err) {
+      setError('Failed to repair Markdown');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -137,7 +153,7 @@ export default function HomePage() {
                     ))}
                   </ul>
                   <Button onClick={handleRepair} className="mt-4">
-                    Fix with AI (Mock)
+                    Fix with AI
                   </Button>
                 </CardContent>
               </Card>
