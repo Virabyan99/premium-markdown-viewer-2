@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
@@ -21,14 +21,18 @@ const theme = {
 
 function Page({ pageJson }: { pageJson: string }) {
   const [editor] = useLexicalComposerContext();
-  useEffect(() => {
+  const isMounted = useRef(false);
+  
+  if (!isMounted.current) {
     try {
       const state = editor.parseEditorState(pageJson);
       editor.setEditorState(state);
+      isMounted.current = true;
     } catch (error) {
       console.error('Error setting page state:', error);
     }
-  }, [editor, pageJson]);
+  }
+  
   return (
     <RichTextPlugin
       contentEditable={<ContentEditable className="prose max-w-none p-2" />}
@@ -39,11 +43,13 @@ function Page({ pageJson }: { pageJson: string }) {
 }
 
 export default function LexicalViewer({ json }: { json: string }) {
-  const [visiblePages, setVisiblePages] = useState([0, 1, 2]);
+  const [visiblePageCount, setVisiblePageCount] = useState(3); // Start with 3 pages
   const containerRef = useRef<HTMLDivElement>(null);
-  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const lastJsonRef = useRef<string | null>(null);
 
+  // Parse JSON and calculate pages
   let parsedState;
   try {
     parsedState = JSON.parse(json);
@@ -63,37 +69,34 @@ export default function LexicalViewer({ json }: { json: string }) {
   const totalNodes = parsedState.root.children.length;
   const pageCount = Math.ceil(totalNodes / nodesPerPage);
 
-  // Create the observer once on mount
-  useEffect(() => {
+  // Reset visiblePageCount when json changes (new file uploaded)
+  if (lastJsonRef.current !== json) {
+    setVisiblePageCount(3);
+    lastJsonRef.current = json;
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+  }
+
+  // Initialize or update observer (runs only once per render if needed)
+  if (!observerRef.current) {
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        console.log('Observer triggered with entries:', entries);
-        const currentPage = entries.find((e) => e.isIntersecting)?.target.getAttribute('data-page');
-        if (currentPage) {
-          const pageNum = parseInt(currentPage, 10);
-          console.log('Page in view:', pageNum);
-          setVisiblePages((prev) => {
-            const newVisiblePages = [
-              Math.max(0, pageNum - 1),
-              pageNum,
-              Math.min(pageNum + 1, pageCount - 1),
-            ];
-            // Prevent unnecessary updates if pages are already visible
-            if (newVisiblePages.every((p) => prev.includes(p)) && prev.length === newVisiblePages.length) {
-              return prev;
-            }
-            return newVisiblePages;
-          });
+        if (entries[0].isIntersecting) {
+          console.log('Sentinel in view, loading more pages');
+          setVisiblePageCount((prev) => Math.min(prev + 3, pageCount));
         }
       },
       { root: containerRef.current, threshold: 0.1 }
     );
+    if (sentinelRef.current) {
+      observerRef.current.observe(sentinelRef.current);
+    }
+  }
 
-    // Cleanup on unmount
-    return () => {
-      observerRef.current?.disconnect();
-    };
-  }, []); // Empty dependency array: runs once
+  // Generate visible pages
+  const visiblePages = Array.from({ length: Math.min(visiblePageCount, pageCount) }, (_, i) => i);
 
   return (
     <Card>
@@ -102,8 +105,7 @@ export default function LexicalViewer({ json }: { json: string }) {
       </CardHeader>
       <CardContent>
         <div ref={containerRef} className="max-h-[80vh] overflow-y-auto space-y-4">
-          {Array.from({ length: pageCount }).map((_, idx) => {
-            if (!visiblePages.includes(idx)) return null;
+          {visiblePages.map((idx) => {
             const start = idx * nodesPerPage;
             const end = start + nodesPerPage;
             const pageNodes = parsedState.root.children.slice(start, end);
@@ -113,17 +115,6 @@ export default function LexicalViewer({ json }: { json: string }) {
             return (
               <div
                 key={idx}
-                ref={(el) => {
-                  // Unobserve previous element if it exists
-                  if (pageRefs.current[idx] && observerRef.current) {
-                    observerRef.current.unobserve(pageRefs.current[idx]);
-                  }
-                  pageRefs.current[idx] = el;
-                  // Observe new element when mounted
-                  if (el && observerRef.current) {
-                    observerRef.current.observe(el);
-                  }
-                }}
                 data-page={idx}
                 className="transition-opacity duration-300"
               >
@@ -141,6 +132,18 @@ export default function LexicalViewer({ json }: { json: string }) {
               </div>
             );
           })}
+          {visiblePageCount < pageCount && (
+            <div
+              ref={(el) => {
+                if (el && observerRef.current && sentinelRef.current !== el) {
+                  if (sentinelRef.current) observerRef.current.unobserve(sentinelRef.current);
+                  observerRef.current.observe(el);
+                  sentinelRef.current = el;
+                }
+              }}
+              className="h-10"
+            />
+          )}
         </div>
       </CardContent>
     </Card>
